@@ -61,20 +61,30 @@ func (f *FilesZip) WriteFile(paths []string, writer io.Writer) (err error) {
 		// TODO 可能需要考虑往外抛执行状态
 
 		log.Println("start get:", path)
+		if err := f.downloadFile(zipWriter, path); err != nil {
+			return err
+		}
+	}
 
-		resp, err := f.client.Get(path)
-		if err != nil {
-			return errors.Wrapf(err, "get file failed: %s", path)
-		}
-		// 自定义文件名
-		pathWriter, err := zipWriter.Create(f.userHook.TransPath(path))
-		if err != nil {
-			return errors.Wrapf(err, "create zip file failed: %s", path)
-		}
-		// 可能有超时的问题
-		if _, err := io.Copy(pathWriter, resp.Body); err != nil {
-			return errors.Wrap(err, "copy body to path writer failed")
-		}
+	return nil
+}
+
+func (f *FilesZip) downloadFile(zipWriter *zip.Writer, path string) error {
+	resp, err := f.client.Get(path)
+	if err != nil {
+		return errors.Wrapf(err, "get file failed: %s", path)
+	}
+	defer resp.Body.Close()
+
+	// 自定义文件名
+	pathWriter, err := zipWriter.Create(f.userHook.TransPath(path))
+	if err != nil {
+		return errors.Wrapf(err, "create zip file failed: %s", path)
+	}
+	// 可能有超时的问题
+	// TODO 测试当 pathWriter 超时断开链接后，body会如何处理
+	if _, err := io.Copy(pathWriter, resp.Body); err != nil {
+		return errors.Wrap(err, "copy body to path writer failed")
 	}
 
 	return nil
