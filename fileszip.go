@@ -38,6 +38,7 @@ func (s Sources) String() string {
 	return string(data)
 }
 
+// ASyncRead 提供给入参为 io.Reader 的 函数使用
 func (f *FilesZip) ASyncRead(sources []Sources) io.Reader {
 	r, w := io.Pipe()
 
@@ -59,13 +60,13 @@ func (f *FilesZip) ASyncRead(sources []Sources) io.Reader {
 	return r
 }
 
+// WriteFile 可直接传入 io.Writer 使用，将zip文件内容直接写入到 writer
 func (f *FilesZip) WriteFile(sources []Sources, writer io.Writer) (err error) {
 	zipWriter := zip.NewWriter(writer)
 	defer zipWriter.Close()
 
 	for _, source := range sources {
 		// TODO 可能需要考虑往外抛执行状态
-
 		by, err := json.Marshal(source)
 		if err != nil {
 			return errors.WithStack(err)
@@ -81,6 +82,7 @@ func (f *FilesZip) WriteFile(sources []Sources, writer io.Writer) (err error) {
 	return nil
 }
 
+// downloadFile 在zip中创建文件，下载文件
 func (f *FilesZip) downloadFile(zipWriter *zip.Writer, sources Sources) error {
 	resp, err := f.client.Get(sources.Url)
 	if err != nil {
