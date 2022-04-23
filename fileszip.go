@@ -2,66 +2,78 @@ package fileszip
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"github.com/pkg/errors"
 	"io"
 	"log"
-	"net"
 	"net/http"
-	"strings"
-	"time"
 )
-
-type DefaultUserHook struct {
-	replacer *strings.Replacer
-}
-
-func (d *DefaultUserHook) TransPath(s string) string {
-	return d.replacer.Replace(s)
-}
-
-var DefaultFilesZip = &FilesZip{
-	client: &http.Client{
-		Transport: &http.Transport{
-			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 10 * time.Second}).DialContext,
-			IdleConnTimeout:       10 * time.Second,
-			ResponseHeaderTimeout: 5 * time.Second,
-			ExpectContinueTimeout: 5 * time.Second,
-		},
-		Timeout: 10 * time.Second,
-	},
-	userHook: &DefaultUserHook{
-		replacer: strings.NewReplacer("https://", "", "http://", "", "/", "-", ":", "-"),
-	},
-}
-
-func WriteFile(paths []string, writer io.Writer) (err error) {
-	return DefaultFilesZip.WriteFile(paths, writer)
-}
 
 type (
 	Client interface {
 		Get(url string) (*http.Response, error)
 	}
 	UserHook interface {
-		TransPath(s string) string
+		TransPath(p Sources) string
 	}
 )
 
 type FilesZip struct {
-	client Client
-
+	debug    bool
+	client   Client
 	userHook UserHook
 }
 
-func (f *FilesZip) WriteFile(paths []string, writer io.Writer) (err error) {
+type Sources struct {
+	Url   string      `json:"url"`
+	Extra interface{} `json:"extra"`
+}
+
+func (s Sources) String() string {
+	data, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+
+	return string(data)
+}
+
+func (f *FilesZip) ASyncRead(sources []Sources) io.Reader {
+	r, w := io.Pipe()
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Println("async read goroutine recovered", r)
+			}
+		}()
+		defer w.Close()
+		if err := WriteFile(sources, w); err != nil {
+			if err := w.CloseWithError(err); err != nil {
+				log.Println("close pipe failed", err.Error())
+			}
+			return
+		}
+	}()
+
+	return r
+}
+
+func (f *FilesZip) WriteFile(sources []Sources, writer io.Writer) (err error) {
 	zipWriter := zip.NewWriter(writer)
 	defer zipWriter.Close()
 
-	for _, path := range paths {
+	for _, source := range sources {
 		// TODO 可能需要考虑往外抛执行状态
 
-		log.Println("start get:", path)
-		if err := f.downloadFile(zipWriter, path); err != nil {
+		by, err := json.Marshal(source)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if f.debug {
+			log.Println("start get:", string(by))
+		}
+		if err := f.downloadFile(zipWriter, source); err != nil {
 			return err
 		}
 	}
@@ -69,20 +81,19 @@ func (f *FilesZip) WriteFile(paths []string, writer io.Writer) (err error) {
 	return nil
 }
 
-func (f *FilesZip) downloadFile(zipWriter *zip.Writer, path string) error {
-	resp, err := f.client.Get(path)
+func (f *FilesZip) downloadFile(zipWriter *zip.Writer, sources Sources) error {
+	resp, err := f.client.Get(sources.Url)
 	if err != nil {
-		return errors.Wrapf(err, "get file failed: %s", path)
+		return errors.Wrapf(err, "get file failed: %s", sources)
 	}
 	defer resp.Body.Close()
 
 	// 自定义文件名
-	pathWriter, err := zipWriter.Create(f.userHook.TransPath(path))
+	pathWriter, err := zipWriter.Create(f.userHook.TransPath(sources))
 	if err != nil {
-		return errors.Wrapf(err, "create zip file failed: %s", path)
+		return errors.Wrapf(err, "create zip file failed: %s", sources)
 	}
 	// 可能有超时的问题
-	// TODO 测试当 pathWriter 超时断开链接后，body会如何处理
 	if _, err := io.Copy(pathWriter, resp.Body); err != nil {
 		return errors.Wrap(err, "copy body to path writer failed")
 	}
