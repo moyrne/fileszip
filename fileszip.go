@@ -3,10 +3,11 @@ package fileszip
 import (
 	"archive/zip"
 	"encoding/json"
-	"github.com/pkg/errors"
 	"io"
 	"log"
 	"net/http"
+
+	"github.com/pkg/errors"
 )
 
 type (
@@ -49,7 +50,7 @@ func (f *FilesZip) ASyncRead(sources []Sources) io.Reader {
 			}
 		}()
 		defer w.Close()
-		if err := WriteFile(sources, w); err != nil {
+		if err := f.WriteFile(sources, w); err != nil {
 			if err := w.CloseWithError(err); err != nil {
 				log.Println("close pipe failed", err.Error())
 			}
