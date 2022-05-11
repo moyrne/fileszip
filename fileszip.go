@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/pkg/errors"
 )
@@ -84,20 +86,31 @@ func (f *FilesZip) WriteFile(sources []Sources, writer io.Writer) (err error) {
 }
 
 // downloadFile 在zip中创建文件，下载文件
-func (f *FilesZip) downloadFile(zipWriter *zip.Writer, sources Sources) error {
-	resp, err := f.client.Get(sources.Url)
-	if err != nil {
-		return errors.Wrapf(err, "get file failed: %s", sources)
+func (f *FilesZip) downloadFile(zipWriter *zip.Writer, source Sources) error {
+	var body io.ReadCloser
+	if strings.HasPrefix(source.Url, "http") {
+		resp, err := f.client.Get(source.Url)
+		if err != nil {
+			return errors.Wrapf(err, "get file failed: %s", source)
+		}
+		body = resp.Body
+	} else {
+		file, err := os.Open(source.Url)
+		if err != nil {
+			return errors.Wrapf(err, "get local file failed: %s", source)
+		}
+		body = file
 	}
-	defer resp.Body.Close()
+
+	defer body.Close()
 
 	// 自定义文件名
-	pathWriter, err := zipWriter.Create(f.userHook.TransPath(sources))
+	pathWriter, err := zipWriter.Create(f.userHook.TransPath(source))
 	if err != nil {
-		return errors.Wrapf(err, "create zip file failed: %s", sources)
+		return errors.Wrapf(err, "create zip file failed: %s", source)
 	}
 	// 可能有超时的问题
-	if _, err := io.Copy(pathWriter, resp.Body); err != nil {
+	if _, err := io.Copy(pathWriter, body); err != nil {
 		return errors.Wrap(err, "copy body to path writer failed")
 	}
 

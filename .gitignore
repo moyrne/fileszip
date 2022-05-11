@@ -1,0 +1,7 @@
+.idea
+/cpu.prof
+/mem.prof
+/tests
+/testsout
+/fileszip.test
+/testsoutfile.zip
